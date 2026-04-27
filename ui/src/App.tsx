@@ -265,6 +265,12 @@ export function App() {
         <Route path="cli-auth/:id" element={<CliAuthPage />} />
         <Route path="invite/:token" element={<InviteLandingPage />} />
 
+        {/* Public demo routes — no auth required, work on static Vercel deploys */}
+        <Route path="yard-proposals/demo" element={<YardProposalDemo />} />
+        <Route path="yard-proposals/demo-backyard" element={<YardProposalDemoBackyard />} />
+        <Route path=":prefix/yard-proposals/demo" element={<YardProposalDemo />} />
+        <Route path=":prefix/yard-proposals/demo-backyard" element={<YardProposalDemoBackyard />} />
+
         <Route element={<CloudAccessGate />}>
           <Route index element={<CompanyRootRedirect />} />
           <Route path="onboarding" element={<OnboardingRoutePage />} />
