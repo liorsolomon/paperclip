@@ -168,9 +168,42 @@ function PointCloudViewer({ glbUrl }: { glbUrl: string }) {
       }
     );
 
+    // Keyboard fly controls — WASD/arrows move, Q/E up/down, R reset
+    const initPos = new THREE.Vector3(0, 2.3, 5.5);
+    const initTarget = new THREE.Vector3(0, 1.5, 0);
+    const keys = new Set<string>();
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      keys.add(e.code);
+      controls.autoRotate = false;
+      if (e.code === "KeyR") {
+        camera.position.copy(initPos);
+        controls.target.copy(initTarget);
+        controls.update();
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => keys.delete(e.code);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+
     let frameId: number;
     const animate = () => {
       frameId = requestAnimationFrame(animate);
+      if (keys.size > 0) {
+        const dist = Math.max(camera.position.distanceTo(controls.target), 0.5);
+        const speed = dist * 0.025;
+        const fwd = new THREE.Vector3().subVectors(controls.target, camera.position).normalize();
+        const right = new THREE.Vector3().crossVectors(fwd, camera.up).normalize();
+        const move = new THREE.Vector3();
+        if (keys.has("KeyW") || keys.has("ArrowUp"))    move.addScaledVector(fwd, speed);
+        if (keys.has("KeyS") || keys.has("ArrowDown"))  move.addScaledVector(fwd, -speed);
+        if (keys.has("KeyA") || keys.has("ArrowLeft"))  move.addScaledVector(right, -speed);
+        if (keys.has("KeyD") || keys.has("ArrowRight")) move.addScaledVector(right, speed);
+        if (keys.has("KeyQ"))                            move.y += speed;
+        if (keys.has("KeyE"))                            move.y -= speed;
+        camera.position.add(move);
+        controls.target.add(move);
+      }
       controls.update();
       renderer.render(scene, camera);
     };
@@ -189,6 +222,8 @@ function PointCloudViewer({ glbUrl }: { glbUrl: string }) {
     return () => {
       cancelAnimationFrame(frameId);
       window.removeEventListener("resize", resize);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
       controls.dispose();
       renderer.dispose();
       if (el.contains(renderer.domElement)) el.removeChild(renderer.domElement);
@@ -209,6 +244,11 @@ function PointCloudViewer({ glbUrl }: { glbUrl: string }) {
       {error && (
         <div className="absolute inset-0 flex items-center justify-center bg-[#0d1117]/80 rounded-lg">
           <p className="text-red-400 text-sm">{error}</p>
+        </div>
+      )}
+      {!loading && !error && (
+        <div className="absolute bottom-2 left-3 text-[11px] text-white/35 select-none pointer-events-none">
+          WASD / ↑↓←→ move · Q/E up/down · drag to rotate · scroll to zoom · R reset
         </div>
       )}
     </div>
