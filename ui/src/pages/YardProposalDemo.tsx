@@ -150,9 +150,13 @@ function PointCloudViewer({ glbUrl }: { glbUrl: string }) {
         scene.add(group);
         // Drop the grid to the actual ground (pavement) level
         grid.position.y = yGroundScaled;
-        // Front view: "standing at the patio looking at the garden"
-        camera.position.set(0, 2, 14);
-        controls.target.set(0, 0, 0);
+        // Ground-level human view: eye height above yard floor, close in
+        // Eye just above the main yard surface (world Y≈+1.7), looking across.
+        camera.fov = 70;
+        camera.updateProjectionMatrix();
+        camera.position.set(0, 2.3, 5.5);
+        controls.target.set(0, 1.5, 0);
+        controls.autoRotateSpeed = 0.25;
         controls.update();
         setLoading(false);
       },
