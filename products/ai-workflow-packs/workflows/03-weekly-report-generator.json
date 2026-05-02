@@ -1,0 +1,199 @@
+{
+  "meta": {
+    "templateCreatedBy": "AI Workflow Packs",
+    "templateId": "weekly-report-generator-v1"
+  },
+  "name": "03 - Weekly Business Report Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [1],
+              "triggerAtHour": 8,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "c1b2c3d4-0003-4003-8003-000000000001",
+      "name": "Every Monday 8am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_METRICS_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Weekly Metrics",
+          "mode": "name"
+        },
+        "options": {
+          "returnAllMatches": true
+        }
+      },
+      "id": "c1b2c3d4-0003-4003-8003-000000000002",
+      "name": "Get Metrics Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [460, 180],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "2",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate last 7 days of metrics from Google Sheets\n// Expected sheet columns: date, revenue, new_customers, churn, support_tickets, website_sessions, conversions\n\nconst rows = $input.all().map(item => item.json);\n\nif (!rows || rows.length === 0) {\n  return { json: { error: 'No metrics data found in sheet', rows: 0 } };\n}\n\n// Get last 7 rows (most recent week)\nconst weekRows = rows.slice(-7);\n\nconst sum = (key) => weekRows.reduce((acc, r) => acc + (parseFloat(r[key]) || 0), 0);\nconst avg = (key) => weekRows.length > 0 ? (sum(key) / weekRows.length).toFixed(1) : 0;\n\n// Calculate week-over-week change (compare last 7 vs previous 7)\nconst prevWeek = rows.slice(-14, -7);\nconst wow = (key) => {\n  const curr = sum(key);\n  const prev = prevWeek.reduce((acc, r) => acc + (parseFloat(r[key]) || 0), 0);\n  if (prev === 0) return 'N/A';\n  const change = (((curr - prev) / prev) * 100).toFixed(1);\n  return (change >= 0 ? '+' : '') + change + '%';\n};\n\nconst metrics = {\n  week_of: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),\n  total_revenue: '$' + sum('revenue').toFixed(2),\n  revenue_wow: wow('revenue'),\n  new_customers: sum('new_customers'),\n  new_customers_wow: wow('new_customers'),\n  churn_count: sum('churn'),\n  support_tickets: sum('support_tickets'),\n  support_tickets_wow: wow('support_tickets'),\n  website_sessions: sum('website_sessions'),\n  website_sessions_wow: wow('website_sessions'),\n  conversions: sum('conversions'),\n  conversion_rate: weekRows.length > 0 \n    ? ((sum('conversions') / sum('website_sessions')) * 100).toFixed(2) + '%' \n    : '0%',\n  data_rows: weekRows.length,\n  date_range: (weekRows[0]?.date || '') + ' — ' + (weekRows[weekRows.length-1]?.date || '')\n};\n\nreturn { json: metrics };"
+      },
+      "id": "c1b2c3d4-0003-4003-8003-000000000003",
+      "name": "Aggregate Weekly Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 180]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({\n  model: 'gpt-4o-mini',\n  messages: [\n    {\n      role: 'system',\n      content: 'You are a business analyst writing a concise weekly performance report for a small business owner. Your report must be exactly 3 paragraphs:\\n1. PERFORMANCE OVERVIEW: Key numbers, whether we hit goals, overall trend\\n2. WINS & CONCERNS: Best news from the week + any red flags that need attention\\n3. PRIORITIES FOR THIS WEEK: 2-3 specific, actionable priorities based on the data\\n\\nTone: direct, no fluff, data-driven. Use specific numbers from the data. Avoid jargon. Write like you are talking to the owner directly.'\n    },\n    {\n      role: 'user',\n      content: 'Write the weekly report for the week of ' + $json.week_of + ':\\n\\nREVENUE: ' + $json.total_revenue + ' (WoW: ' + $json.revenue_wow + ')\\nNEW CUSTOMERS: ' + $json.new_customers + ' (WoW: ' + $json.new_customers_wow + ')\\nCHURN: ' + $json.churn_count + ' customers\\nSUPPORT TICKETS: ' + $json.support_tickets + ' (WoW: ' + $json.support_tickets_wow + ')\\nWEBSITE SESSIONS: ' + $json.website_sessions + ' (WoW: ' + $json.website_sessions_wow + ')\\nCONVERSIONS: ' + $json.conversions + ' (' + $json.conversion_rate + ' rate)\\nDATE RANGE: ' + $json.date_range\n    }\n  ],\n  max_tokens: 500\n}) }}"
+      },
+      "id": "c1b2c3d4-0003-4003-8003-000000000004",
+      "name": "Write Report with AI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "1",
+          "name": "OpenAI API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const aiContent = $input.item.json.choices[0].message.content;\nconst metrics = $('Aggregate Weekly Metrics').item.json;\n\nconst subjectDate = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' });\n\nconst htmlBody = `\n<div style=\"font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;\">\n  <h2 style=\"color: #1a1a2e; border-bottom: 2px solid #e8e8e8; padding-bottom: 10px;\">\n    Weekly Business Report — ${metrics.week_of}\n  </h2>\n\n  <div style=\"background: #f8f9fa; border-radius: 8px; padding: 16px; margin: 16px 0;\">\n    <h3 style=\"margin-top: 0; color: #495057;\">At a Glance</h3>\n    <table style=\"width: 100%; border-collapse: collapse;\">\n      <tr>\n        <td style=\"padding: 4px 8px;\">💰 Revenue</td>\n        <td style=\"padding: 4px 8px; font-weight: bold;\">${metrics.total_revenue}</td>\n        <td style=\"padding: 4px 8px; color: ${metrics.revenue_wow.startsWith('+') ? 'green' : 'red'}\">${metrics.revenue_wow}</td>\n      </tr>\n      <tr>\n        <td style=\"padding: 4px 8px;\">👥 New Customers</td>\n        <td style=\"padding: 4px 8px; font-weight: bold;\">${metrics.new_customers}</td>\n        <td style=\"padding: 4px 8px; color: ${metrics.new_customers_wow.startsWith('+') ? 'green' : 'red'}\">${metrics.new_customers_wow}</td>\n      </tr>\n      <tr>\n        <td style=\"padding: 4px 8px;\">🌐 Sessions</td>\n        <td style=\"padding: 4px 8px; font-weight: bold;\">${metrics.website_sessions}</td>\n        <td style=\"padding: 4px 8px; color: ${metrics.website_sessions_wow.startsWith('+') ? 'green' : 'red'}\">${metrics.website_sessions_wow}</td>\n      </tr>\n      <tr>\n        <td style=\"padding: 4px 8px;\">🎯 Conversion Rate</td>\n        <td style=\"padding: 4px 8px; font-weight: bold;\">${metrics.conversion_rate}</td>\n        <td style=\"padding: 4px 8px;\">—</td>\n      </tr>\n      <tr>\n        <td style=\"padding: 4px 8px;\">🎫 Support Tickets</td>\n        <td style=\"padding: 4px 8px; font-weight: bold;\">${metrics.support_tickets}</td>\n        <td style=\"padding: 4px 8px; color: ${metrics.support_tickets_wow.startsWith('-') ? 'green' : 'red'}\">${metrics.support_tickets_wow}</td>\n      </tr>\n    </table>\n  </div>\n\n  <div style=\"line-height: 1.7; margin: 16px 0;\">\n    ${aiContent.split('\\n\\n').map(p => `<p>${p}</p>`).join('')}\n  </div>\n\n  <p style=\"color: #888; font-size: 12px; border-top: 1px solid #e8e8e8; padding-top: 10px;\">\n    Auto-generated by AI Weekly Report workflow • ${new Date().toISOString()}\n  </p>\n</div>\n`;\n\nreturn {\n  json: {\n    subject: `Weekly Report — ${subjectDate}: Revenue ${metrics.total_revenue} (${metrics.revenue_wow})`,\n    html_body: htmlBody,\n    text_body: aiContent,\n    metrics\n  }\n};"
+      },
+      "id": "c1b2c3d4-0003-4003-8003-000000000005",
+      "name": "Format Email Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL@example.com",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "message": "={{ $json.html_body }}",
+        "options": {}
+      },
+      "id": "c1b2c3d4-0003-4003-8003-000000000006",
+      "name": "Email Report to Owner",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1340, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "4",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_METRICS_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Report Log",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "report_date": "={{ new Date().toISOString() }}",
+            "week_of": "={{ $('Aggregate Weekly Metrics').item.json.week_of }}",
+            "revenue": "={{ $('Aggregate Weekly Metrics').item.json.total_revenue }}",
+            "new_customers": "={{ $('Aggregate Weekly Metrics').item.json.new_customers }}",
+            "status": "sent"
+          }
+        },
+        "options": {}
+      },
+      "id": "c1b2c3d4-0003-4003-8003-000000000007",
+      "name": "Log Report Sent",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1560, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "2",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Every Monday 8am": {
+      "main": [
+        [{ "node": "Get Metrics Sheet", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Metrics Sheet": {
+      "main": [
+        [{ "node": "Aggregate Weekly Metrics", "type": "main", "index": 0 }]
+      ]
+    },
+    "Aggregate Weekly Metrics": {
+      "main": [
+        [{ "node": "Write Report with AI", "type": "main", "index": 0 }]
+      ]
+    },
+    "Write Report with AI": {
+      "main": [
+        [{ "node": "Format Email Report", "type": "main", "index": 0 }]
+      ]
+    },
+    "Format Email Report": {
+      "main": [
+        [{ "node": "Email Report to Owner", "type": "main", "index": 0 }]
+      ]
+    },
+    "Email Report to Owner": {
+      "main": [
+        [{ "node": "Log Report Sent", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "timezone": "America/New_York"
+  },
+  "id": "wf-weekly-report-generator-v1",
+  "tags": ["reporting", "analytics", "ai", "gmail", "google-sheets", "smb"]
+}
