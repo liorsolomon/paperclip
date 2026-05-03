@@ -1,0 +1,483 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowUp, Check, Copy, Download } from "lucide-react";
+import { cn } from "../lib/utils";
+
+// ── Agent definitions ─────────────────────────────────────────────────────
+
+type Agent = {
+  id: string;
+  name: string;
+  emoji: string;
+  prompt: string;
+  color: string;
+  responses: string[];
+};
+
+const AGENTS: Agent[] = [
+  {
+    id: "cold-pitch",
+    name: "Cold Pitch",
+    emoji: "✉️",
+    prompt: "Craft compelling initial outreach",
+    color: "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100",
+    responses: [
+      `Here's a cold pitch tailored to your target:\n\nSubject: Quick idea for [Company]\n\nHi [Name],\n\nI noticed [Company] has been [specific observation]. Most teams in your position struggle with [pain point].\n\nWe helped [similar company] solve exactly this — [specific result] in [timeframe].\n\nWorth a 15-minute call to see if it fits? I have [Day] at [Time] open.\n\n[Your name]`,
+      `Cold pitch draft:\n\n**Subject**: One question about [Company]'s [goal]\n\nHi [Name],\n\nApologies for the cold reach — I'll be brief.\n\n[Company] is doing interesting work on [topic]. We've built something that directly addresses [specific challenge], and the ROI has been meaningful for similar teams.\n\nCan I send you a 2-min overview? No call needed unless it sparks interest.\n\nThanks,\n[Your name]`,
+    ],
+  },
+  {
+    id: "pricing-reframe",
+    name: "Pricing",
+    emoji: "💎",
+    prompt: "Turn price objections into value",
+    color: "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100",
+    responses: [
+      `When a prospect says "it's too expensive," they're really saying they don't yet see the value. Here's how to reframe:\n\n**Anchor to cost of inaction**: "What does this problem cost you per month right now? If we solve it, the investment pays back in [X weeks]."\n\n**Break it down**: "[Price] sounds large until you divide it by [users/months/deals]. That's [small number] per [unit]."\n\n**Compare to alternatives**: "The question isn't whether this costs money — it's whether it costs less than [current solution / not solving it]."\n\nWhich objection are you facing specifically?`,
+      `Price objection response:\n\n"I completely understand — budget decisions deserve scrutiny. Let me offer some context:\n\nOur current customers see an average of [X]% [metric] improvement within [timeframe]. For a company your size, that typically translates to [$Y] in [recovered time / new revenue / saved cost].\n\nIf those numbers hold for you, what would the right investment look like?"\n\nThis flips the conversation from cost to ROI.`,
+    ],
+  },
+  {
+    id: "linkedin",
+    name: "LinkedIn",
+    emoji: "🔗",
+    prompt: "Connect and message on LinkedIn",
+    color: "bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100",
+    responses: [
+      `LinkedIn connection request (300 chars max):\n\n"Hi [Name], I came across your post on [topic] — [specific detail you liked]. I work on [relevant thing] and think we'd have an interesting conversation. Would love to connect."\n\n**Why it works**: Personal, specific, low-pressure. Not selling anything.\n\n**Follow-up message after connecting** (send 2–3 days later):\n"Thanks for connecting! [Reference their recent content or company news]. Curious — how are you thinking about [relevant challenge]?"`,
+      `LinkedIn outreach sequence:\n\n**Day 1 — Connect**: Reference something specific from their profile or content. No pitch.\n\n**Day 4 — Value add**: Share something genuinely useful. "Saw this and thought of your work on [X]" + link.\n\n**Day 10 — Soft ask**: "Been meaning to ask — are you still [challenge]? We've been helping [similar role] with this. Happy to share what we're seeing."`,
+    ],
+  },
+  {
+    id: "proposal",
+    name: "Proposal",
+    emoji: "📄",
+    prompt: "Write winning sales proposals",
+    color: "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100",
+    responses: [
+      `**Proposal structure that closes**:\n\n1. **The Problem** — reflect their words back. Show you listened.\n2. **The Cost** — quantify what staying stuck costs them.\n3. **The Approach** — specific to them, not generic.\n4. **Social proof** — one tight case study, same industry/size.\n5. **Investment** — present as a range or tiered options.\n6. **Next step** — one clear action, deadline creates urgency.\n\nKeep it under 4 pages. Decision-makers don't read more.`,
+      `Here's a proposal opening that works:\n\n"This proposal responds to [Company]'s goal of [goal] by [timeframe].\n\nBased on our conversation, the core challenge is [problem in their words]. Left unresolved, this costs [quantified impact].\n\nThis engagement delivers [specific outcome] through [approach]. Companies like [example] achieved [result] using this method.\n\n---\n\n**Scope**: [What you'll do]\n**Timeline**: [When]\n**Investment**: Starting at $[X]\n\n**To move forward**: [Single next step]"`,
+    ],
+  },
+  {
+    id: "check-in",
+    name: "Check-in",
+    emoji: "👋",
+    prompt: "Follow up and nurture relationships",
+    color: "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100",
+    responses: [
+      `Follow-up message after a meeting:\n\n"Hi [Name],\n\nGreat talking yesterday. Three things I took away:\n1. [Their priority you'll address]\n2. [Their timeline]\n3. [The concern you'll answer]\n\nAttached is [promised resource]. I'll also send over [next deliverable] by [date].\n\nAny questions before then, I'm here.\n\n[Your name]"\n\n**Why this works**: Shows you listened, sets expectations, opens the door.`,
+      `Re-engagement message (60–90 days of silence):\n\n"Hi [Name],\n\nIt's been a while — hope [their company] is going well.\n\nI won't pretend I'm not following up with a purpose. We just [relevant update — new feature, case study, price event].\n\nGiven where you were at when we last spoke on [topic], I thought you'd want to know.\n\nStill exploring options, or has the landscape changed?"\n\nThis is honest and gives them a reason to re-engage.`,
+    ],
+  },
+];
+
+// ── Free runs tracking ────────────────────────────────────────────────────
+
+const FREE_RUNS_KEY = "goffer-free-runs-v1";
+const FREE_RUNS_LIMIT = 3;
+
+type FreeRunsStore = Record<string, { count: number; date: string }>;
+
+function getTodayKey(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function loadFreeRuns(): FreeRunsStore {
+  try {
+    return JSON.parse(localStorage.getItem(FREE_RUNS_KEY) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
+function saveFreeRuns(store: FreeRunsStore) {
+  localStorage.setItem(FREE_RUNS_KEY, JSON.stringify(store));
+}
+
+function getRemainingRuns(agentId: string): number {
+  const store = loadFreeRuns();
+  const today = getTodayKey();
+  const entry = store[agentId];
+  if (!entry || entry.date !== today) return FREE_RUNS_LIMIT;
+  return Math.max(0, FREE_RUNS_LIMIT - entry.count);
+}
+
+function consumeRun(agentId: string) {
+  const store = loadFreeRuns();
+  const today = getTodayKey();
+  const entry = store[agentId];
+  if (!entry || entry.date !== today) {
+    store[agentId] = { count: 1, date: today };
+  } else {
+    store[agentId] = { count: entry.count + 1, date: today };
+  }
+  saveFreeRuns(store);
+}
+
+// ── Types ─────────────────────────────────────────────────────────────────
+
+type Message = {
+  id: string;
+  role: "user" | "assistant";
+  agentId: string;
+  content: string;
+  isStreaming?: boolean;
+};
+
+// ── Streaming simulation ──────────────────────────────────────────────────
+
+function pickResponse(agent: Agent): string {
+  const i = Math.floor(Math.random() * agent.responses.length);
+  return agent.responses[i];
+}
+
+async function* streamWords(text: string): AsyncGenerator<string> {
+  const words = text.split(/(\s+)/);
+  for (const word of words) {
+    yield word;
+    await new Promise<void>((r) => setTimeout(r, 18 + Math.random() * 22));
+  }
+}
+
+// ── Sub-components ────────────────────────────────────────────────────────
+
+function AgentPill({
+  agent,
+  selected,
+  disabled,
+  runsLeft,
+  onClick,
+}: {
+  agent: Agent;
+  selected: boolean;
+  disabled: boolean;
+  runsLeft: number;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all",
+        selected
+          ? cn(agent.color, "ring-1 ring-current ring-offset-1 shadow-sm")
+          : cn(agent.color, "opacity-70"),
+        disabled && "cursor-not-allowed opacity-40",
+      )}
+      title={`${agent.prompt} · ${runsLeft} free run${runsLeft !== 1 ? "s" : ""} left today`}
+    >
+      <span>{agent.emoji}</span>
+      <span>{agent.name}</span>
+      {runsLeft < FREE_RUNS_LIMIT && (
+        <span className="text-[10px] opacity-60">({runsLeft})</span>
+      )}
+    </button>
+  );
+}
+
+function MessageBubble({
+  message,
+  agent,
+  onCopy,
+  onDownload,
+}: {
+  message: Message;
+  agent: Agent | undefined;
+  onCopy: (text: string) => void;
+  onDownload: (text: string, agentName: string) => void;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    onCopy(message.content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  const isUser = message.role === "user";
+
+  return (
+    <div className={cn("group flex flex-col", isUser ? "items-end" : "items-start")}>
+      {!isUser && agent && (
+        <div className="mb-1.5 flex items-center gap-1.5 px-1">
+          <span className="text-base leading-none">{agent.emoji}</span>
+          <span className="text-xs font-medium text-gray-400">{agent.name}</span>
+        </div>
+      )}
+
+      <div
+        className={cn(
+          "relative max-w-[520px] rounded-2xl px-5 py-3.5",
+          isUser
+            ? "bg-gray-900 text-white"
+            : "bg-white/80 text-gray-800 shadow-[0_2px_16px_rgba(0,0,0,0.06)] ring-1 ring-black/5",
+        )}
+      >
+        <div className="whitespace-pre-wrap text-sm leading-relaxed">
+          {message.content}
+          {message.isStreaming && (
+            <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-current opacity-60" />
+          )}
+        </div>
+
+        {!isUser && !message.isStreaming && (
+          <div className="mt-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+            <button
+              onClick={handleCopy}
+              className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+            >
+              {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+              {copied ? "Copied" : "Copy"}
+            </button>
+            <button
+              onClick={() => onDownload(message.content, agent?.name ?? "response")}
+              className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+            >
+              <Download className="h-3 w-3" />
+              Save
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────
+
+export function ChatInterface() {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState("");
+  const [selectedAgentId, setSelectedAgentId] = useState<string>(AGENTS[0].id);
+  const [streaming, setStreaming] = useState(false);
+  const [runsLeft, setRunsLeft] = useState<Record<string, number>>(() =>
+    Object.fromEntries(AGENTS.map((a) => [a.id, getRemainingRuns(a.id)])),
+  );
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const selectedAgent = AGENTS.find((a) => a.id === selectedAgentId) ?? AGENTS[0];
+
+  const refreshRunsLeft = useCallback(() => {
+    setRunsLeft(Object.fromEntries(AGENTS.map((a) => [a.id, getRemainingRuns(a.id)])));
+  }, []);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const handleCopy = (text: string) => {
+    navigator.clipboard.writeText(text).catch(() => {});
+  };
+
+  const handleDownload = (text: string, agentName: string) => {
+    const blob = new Blob([text], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${agentName.toLowerCase().replace(/\s+/g, "-")}-response.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleSubmit = async () => {
+    const text = input.trim();
+    if (!text || streaming) return;
+    if (runsLeft[selectedAgentId] <= 0) return;
+
+    const agent = selectedAgent;
+    const userMsgId = crypto.randomUUID();
+    const assistantMsgId = crypto.randomUUID();
+
+    setMessages((prev) => [
+      ...prev,
+      { id: userMsgId, role: "user", agentId: agent.id, content: text },
+    ]);
+    setInput("");
+    setStreaming(true);
+
+    consumeRun(agent.id);
+    refreshRunsLeft();
+
+    const responseText = pickResponse(agent);
+
+    setMessages((prev) => [
+      ...prev,
+      { id: assistantMsgId, role: "assistant", agentId: agent.id, content: "", isStreaming: true },
+    ]);
+
+    let accumulated = "";
+    for await (const chunk of streamWords(responseText)) {
+      accumulated += chunk;
+      const snapshot = accumulated;
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantMsgId ? { ...m, content: snapshot } : m,
+        ),
+      );
+    }
+
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === assistantMsgId ? { ...m, isStreaming: false } : m,
+      ),
+    );
+    setStreaming(false);
+    textareaRef.current?.focus();
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit();
+    }
+  };
+
+  const hasMessages = messages.length > 0;
+  const canSend = input.trim().length > 0 && !streaming && runsLeft[selectedAgentId] > 0;
+
+  return (
+    <main className="flex min-h-screen flex-col bg-[#FAFAF9]">
+      {/* Minimal header */}
+      <header
+        className={cn(
+          "sticky top-0 z-10 flex items-center justify-between border-b border-gray-100/80 bg-[#FAFAF9]/90 px-6 py-3 backdrop-blur-sm transition-all duration-300",
+          hasMessages ? "opacity-100" : "opacity-0 pointer-events-none",
+        )}
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-base">{selectedAgent.emoji}</span>
+          <span className="text-sm font-medium text-gray-700">{selectedAgent.name}</span>
+        </div>
+        <button
+          onClick={() => setMessages([])}
+          className="rounded-lg px-3 py-1 text-xs text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+        >
+          New chat
+        </button>
+      </header>
+
+      {/* Content area */}
+      <div className="flex flex-1 flex-col">
+        {!hasMessages ? (
+          /* ── Empty / home state ── */
+          <div className="flex flex-1 flex-col items-center justify-center px-4 py-20">
+            <div className="mb-12 text-center">
+              <h1 className="text-3xl font-light tracking-tight text-gray-800">
+                What can I help with?
+              </h1>
+              <p className="mt-3 text-sm text-gray-400">
+                Pick an agent and start a conversation
+              </p>
+            </div>
+
+            {/* Agent cards on home */}
+            <div className="mb-10 grid max-w-lg grid-cols-2 gap-3 sm:grid-cols-3 w-full">
+              {AGENTS.map((agent) => (
+                <button
+                  key={agent.id}
+                  onClick={() => setSelectedAgentId(agent.id)}
+                  disabled={runsLeft[agent.id] <= 0}
+                  className={cn(
+                    "rounded-2xl border p-4 text-left transition-all",
+                    agent.color,
+                    selectedAgentId === agent.id && "ring-2 ring-current ring-offset-2 shadow-md",
+                    runsLeft[agent.id] <= 0 && "cursor-not-allowed opacity-40",
+                  )}
+                >
+                  <div className="mb-2 text-2xl">{agent.emoji}</div>
+                  <div className="text-sm font-semibold">{agent.name}</div>
+                  <div className="mt-0.5 text-xs opacity-70">{agent.prompt}</div>
+                  <div className="mt-2 text-[10px] opacity-50">
+                    {runsLeft[agent.id]} run{runsLeft[agent.id] !== 1 ? "s" : ""} left
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          /* ── Message stream ── */
+          <div className="flex-1 overflow-y-auto">
+            <div className="mx-auto max-w-[600px] space-y-8 px-6 py-14">
+              {messages.map((msg) => (
+                <MessageBubble
+                  key={msg.id}
+                  message={msg}
+                  agent={AGENTS.find((a) => a.id === msg.agentId)}
+                  onCopy={handleCopy}
+                  onDownload={handleDownload}
+                />
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Input area ── */}
+      <div className="sticky bottom-0 bg-gradient-to-t from-[#FAFAF9] via-[#FAFAF9] to-transparent pb-8 pt-4">
+        <div className="mx-auto max-w-[600px] px-4">
+          <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-[0_4px_24px_rgba(0,0,0,0.08)]">
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={`Ask ${selectedAgent.name}...`}
+              rows={1}
+              disabled={streaming || runsLeft[selectedAgentId] <= 0}
+              className={cn(
+                "w-full resize-none bg-transparent px-4 pt-3.5 pb-2 text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none",
+                "min-h-[52px] max-h-40",
+              )}
+              style={{ height: "auto" }}
+              onInput={(e) => {
+                const el = e.currentTarget;
+                el.style.height = "auto";
+                el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+              }}
+            />
+
+            {/* Footer: agent pills + send */}
+            <div className="flex items-center justify-between gap-2 px-3 pb-2.5">
+              <div className="flex flex-wrap gap-1.5">
+                {AGENTS.map((agent) => (
+                  <AgentPill
+                    key={agent.id}
+                    agent={agent}
+                    selected={selectedAgentId === agent.id}
+                    disabled={streaming}
+                    runsLeft={runsLeft[agent.id]}
+                    onClick={() => setSelectedAgentId(agent.id)}
+                  />
+                ))}
+              </div>
+
+              <button
+                onClick={handleSubmit}
+                disabled={!canSend}
+                className={cn(
+                  "flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl transition-all",
+                  canSend
+                    ? "bg-gray-900 text-white hover:bg-gray-700 shadow-sm"
+                    : "bg-gray-100 text-gray-300 cursor-not-allowed",
+                )}
+                aria-label="Send message"
+              >
+                <ArrowUp className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Out of runs notice */}
+            {runsLeft[selectedAgentId] <= 0 && (
+              <div className="border-t border-gray-100 px-4 py-2 text-center text-xs text-gray-400">
+                Free runs used up for today · Resets at midnight
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </main>
+  );
+}
