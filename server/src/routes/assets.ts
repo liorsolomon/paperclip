@@ -309,6 +309,70 @@ export function assetRoutes(db: Db, storage: StorageService) {
     });
   });
 
+  router.get("/companies/:companyId/assets", async (req, res) => {
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+
+    const q = typeof req.query.q === "string" && req.query.q.trim() ? req.query.q.trim() : undefined;
+    const page = Number(req.query.page) || 1;
+    const perPage = Number(req.query.per_page) || 50;
+
+    const result = await svc.listByCompany(companyId, { q, page, perPage });
+
+    res.json({
+      files: result.files.map((a) => ({
+        id: a.id,
+        originalFilename: a.originalFilename,
+        contentType: a.contentType,
+        byteSize: a.byteSize,
+        createdAt: a.createdAt,
+        contentPath: `/api/assets/${a.id}/content`,
+      })),
+      total: result.total,
+      page: result.page,
+      perPage: result.perPage,
+    });
+  });
+
+  router.delete("/companies/:companyId/assets/:assetId", async (req, res) => {
+    const { companyId, assetId } = req.params as { companyId: string; assetId: string };
+    assertCompanyAccess(req, companyId);
+
+    const asset = await svc.getById(assetId);
+    if (!asset || asset.companyId !== companyId) {
+      res.status(404).json({ error: "Asset not found" });
+      return;
+    }
+
+    const deleted = await svc.deleteById(assetId, companyId);
+    if (!deleted) {
+      res.status(404).json({ error: "Asset not found" });
+      return;
+    }
+
+    try {
+      await storage.deleteObject(companyId, asset.objectKey);
+    } catch (err) {
+      // Log but don't fail — orphaned storage objects are acceptable
+      console.error("Storage delete failed for asset", assetId, err);
+    }
+
+    const actor = getActorInfo(req);
+    await logActivity(db, {
+      companyId,
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      agentId: actor.agentId,
+      runId: actor.runId,
+      action: "asset.deleted",
+      entityType: "asset",
+      entityId: assetId,
+      details: { originalFilename: asset.originalFilename },
+    });
+
+    res.json({ deleted: assetId });
+  });
+
   router.get("/assets/:assetId/content", async (req, res, next) => {
     const assetId = req.params.assetId as string;
     const asset = await svc.getById(assetId);

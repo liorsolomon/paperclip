@@ -1,4 +1,7 @@
 export const queryKeys = {
+  assets: {
+    list: (companyId: string, q?: string) => ["assets", companyId, q ?? ""] as const,
+  },
   companies: {
     all: ["companies"] as const,
     detail: (id: string) => ["companies", id] as const,

@@ -46,6 +46,7 @@ import { RunTranscriptUxLab } from "./pages/RunTranscriptUxLab";
 import { YardProposalDemo } from "./pages/YardProposalDemo";
 import { YardProposalDemoBackyard } from "./pages/YardProposalDemoBackyard";
 import { ChatInterface } from "./pages/ChatInterface";
+import { Assets } from "./pages/Assets";
 import { OrgChart } from "./pages/OrgChart";
 import { NewAgent } from "./pages/NewAgent";
 import { AuthPage } from "./pages/Auth";
@@ -130,6 +131,7 @@ function boardRoutes() {
       <Route path="tests/ux/runs" element={<RunTranscriptUxLab />} />
       <Route path="yard-proposals/demo" element={<YardProposalDemo />} />
       <Route path="yard-proposals/demo-backyard" element={<YardProposalDemoBackyard />} />
+      <Route path="assets" element={<Assets />} />
       <Route path="goffer-chat" element={<ChatInterface />} />
       <Route path="instance/settings/adapters" element={<AdapterManager />} />
       <Route path=":pluginRoutePath" element={<PluginPage />} />
