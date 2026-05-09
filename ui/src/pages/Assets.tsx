@@ -172,7 +172,7 @@ export function Assets() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (assetId: string) => assetsApi.deleteAsset(selectedCompanyId!, assetId),
+    mutationFn: (assetId: string) => assetsApi.deleteFile(assetId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["assets", selectedCompanyId!] });
       setPendingDelete(null);

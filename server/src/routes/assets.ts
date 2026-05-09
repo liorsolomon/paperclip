@@ -309,8 +309,12 @@ export function assetRoutes(db: Db, storage: StorageService) {
     });
   });
 
-  router.get("/companies/:companyId/assets", async (req, res) => {
-    const companyId = req.params.companyId as string;
+  router.get("/files", async (req, res) => {
+    const companyId = typeof req.query.companyId === "string" ? req.query.companyId : undefined;
+    if (!companyId) {
+      res.status(400).json({ error: "Missing required query param: companyId" });
+      return;
+    }
     assertCompanyAccess(req, companyId);
 
     const q = typeof req.query.q === "string" && req.query.q.trim() ? req.query.q.trim() : undefined;
@@ -334,43 +338,43 @@ export function assetRoutes(db: Db, storage: StorageService) {
     });
   });
 
-  router.delete("/companies/:companyId/assets/:assetId", async (req, res) => {
-    const { companyId, assetId } = req.params as { companyId: string; assetId: string };
-    assertCompanyAccess(req, companyId);
+  router.delete("/files/:fileId", async (req, res) => {
+    const { fileId } = req.params as { fileId: string };
 
-    const asset = await svc.getById(assetId);
-    if (!asset || asset.companyId !== companyId) {
-      res.status(404).json({ error: "Asset not found" });
+    const asset = await svc.getById(fileId);
+    if (!asset) {
+      res.status(404).json({ error: "File not found" });
       return;
     }
+    assertCompanyAccess(req, asset.companyId);
 
-    const deleted = await svc.deleteById(assetId, companyId);
+    const deleted = await svc.deleteById(fileId, asset.companyId);
     if (!deleted) {
-      res.status(404).json({ error: "Asset not found" });
+      res.status(404).json({ error: "File not found" });
       return;
     }
 
     try {
-      await storage.deleteObject(companyId, asset.objectKey);
+      await storage.deleteObject(asset.companyId, asset.objectKey);
     } catch (err) {
       // Log but don't fail — orphaned storage objects are acceptable
-      console.error("Storage delete failed for asset", assetId, err);
+      console.error("Storage delete failed for file", fileId, err);
     }
 
     const actor = getActorInfo(req);
     await logActivity(db, {
-      companyId,
+      companyId: asset.companyId,
       actorType: actor.actorType,
       actorId: actor.actorId,
       agentId: actor.agentId,
       runId: actor.runId,
       action: "asset.deleted",
       entityType: "asset",
-      entityId: assetId,
+      entityId: fileId,
       details: { originalFilename: asset.originalFilename },
     });
 
-    res.json({ deleted: assetId });
+    res.json({ deleted: fileId });
   });
 
   router.get("/assets/:assetId/content", async (req, res, next) => {

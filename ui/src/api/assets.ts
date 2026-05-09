@@ -19,16 +19,15 @@ export type AssetListResult = {
 
 export const assetsApi = {
   list: (companyId: string, opts?: { q?: string; page?: number; perPage?: number }) => {
-    const params = new URLSearchParams();
+    const params = new URLSearchParams({ companyId });
     if (opts?.q) params.set("q", opts.q);
     if (opts?.page) params.set("page", String(opts.page));
     if (opts?.perPage) params.set("per_page", String(opts.perPage));
-    const qs = params.toString();
-    return api.get<AssetListResult>(`/companies/${companyId}/assets${qs ? `?${qs}` : ""}`);
+    return api.get<AssetListResult>(`/files?${params.toString()}`);
   },
 
-  deleteAsset: (companyId: string, assetId: string) =>
-    api.delete<{ deleted: string }>(`/companies/${companyId}/assets/${assetId}`),
+  deleteFile: (fileId: string) =>
+    api.delete<{ deleted: string }>(`/files/${fileId}`),
 
   uploadImage: async (companyId: string, file: File, namespace?: string) => {
     // Read file data into memory eagerly so the fetch body is self-contained.
