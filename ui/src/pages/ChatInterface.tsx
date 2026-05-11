@@ -114,6 +114,95 @@ function consumeRun(agentId: string) {
   saveFreeRuns(store);
 }
 
+// ── GA4 telemetry ─────────────────────────────────────────────────────────
+
+const GA_ID = import.meta.env.VITE_GA_MEASUREMENT_ID as string | undefined;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const win = () => window as any;
+
+function initGa4() {
+  if (!GA_ID || typeof window === "undefined" || win().__ga4Init) return;
+  win().__ga4Init = true;
+  win().dataLayer = win().dataLayer || [];
+  const push = (...args: unknown[]) => win().dataLayer.push(args);
+  push("js", new Date());
+  push("config", GA_ID);
+  const s = document.createElement("script");
+  s.src = `https://www.googletagmanager.com/gtag/js?id=${GA_ID}`;
+  s.async = true;
+  document.head.appendChild(s);
+}
+
+function ga4Event(event: string, params?: Record<string, unknown>) {
+  if (!GA_ID || !Array.isArray(win().dataLayer)) return;
+  win().dataLayer.push(["event", event, params ?? {}]);
+}
+
+// ── Attribution helpers ───────────────────────────────────────────────────
+
+type ReferrerSource = "twitter" | "indie_hackers" | "direct" | "other";
+
+function detectReferrerSource(): ReferrerSource {
+  const params = new URLSearchParams(window.location.search);
+  const utmSource = params.get("utm_source")?.toLowerCase() ?? "";
+
+  if (utmSource === "twitter" || utmSource === "x") return "twitter";
+  if (utmSource === "indie_hackers" || utmSource === "indiehackers") return "indie_hackers";
+
+  const ref = document.referrer?.toLowerCase() ?? "";
+  if (ref.includes("twitter.com") || ref.includes("t.co") || ref.includes("x.com")) return "twitter";
+  if (ref.includes("indiehackers.com")) return "indie_hackers";
+
+  return ref ? "other" : "direct";
+}
+
+function captureUtmParams() {
+  const params = new URLSearchParams(window.location.search);
+  return {
+    utm_source: params.get("utm_source") ?? "",
+    utm_medium: params.get("utm_medium") ?? "",
+    utm_campaign: params.get("utm_campaign") ?? "",
+  };
+}
+
+async function writeGofferSignup(payload: {
+  email: string;
+  referrer_source: ReferrerSource;
+  feature_view_sequence: string[];
+  utm_source: string;
+  utm_medium: string;
+  utm_campaign: string;
+}) {
+  const supabaseUrl = import.meta.env.VITE_GOFFER_SUPABASE_URL?.trim();
+  const supabaseKey = import.meta.env.VITE_GOFFER_SUPABASE_ANON_KEY?.trim();
+
+  if (!supabaseUrl || !supabaseKey) {
+    console.warn("[goffer] Supabase not configured — signup not persisted");
+    return;
+  }
+
+  const res = await fetch(`${supabaseUrl}/rest/v1/goffer_signups`, {
+    method: "POST",
+    headers: {
+      apikey: supabaseKey,
+      Authorization: `Bearer ${supabaseKey}`,
+      "Content-Type": "application/json",
+      Prefer: "return=minimal",
+    },
+    body: JSON.stringify({
+      ...payload,
+      feature_view_sequence: payload.feature_view_sequence.join(","),
+      signed_up_at: new Date().toISOString(),
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Supabase ${res.status}: ${body.slice(0, 120)}`);
+  }
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────
 
 type Message = {
@@ -198,7 +287,7 @@ function MessageBubble({
   const isUser = message.role === "user";
 
   return (
-    <div className={cn("group flex flex-col", isUser ? "items-end" : "items-start")}>
+    <div className={cn("group flex flex-col chat-message-in", isUser ? "items-end" : "items-start")}>
       {!isUser && agent && (
         <div className="mb-1.5 flex items-center gap-1.5 px-1">
           <span className="text-base leading-none">{agent.emoji}</span>
@@ -212,6 +301,7 @@ function MessageBubble({
           isUser
             ? "bg-gray-900 text-white"
             : "bg-white/80 text-gray-800 shadow-[0_2px_16px_rgba(0,0,0,0.06)] ring-1 ring-black/5",
+          !isUser && message.isStreaming && "breathing-glow",
         )}
       >
         <div className="whitespace-pre-wrap text-sm leading-relaxed">
@@ -244,6 +334,86 @@ function MessageBubble({
   );
 }
 
+// ── Email capture gate ────────────────────────────────────────────────────
+
+function SignupGate({
+  referrerSource,
+  featureViewSequence,
+  utmParams,
+}: {
+  referrerSource: ReferrerSource;
+  featureViewSequence: string[];
+  utmParams: { utm_source: string; utm_medium: string; utm_campaign: string };
+}) {
+  const [email, setEmail] = useState("");
+  const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [errorMsg, setErrorMsg] = useState("");
+
+  const handleSubmit = async () => {
+    const trimmed = email.trim();
+    if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      setErrorMsg("Please enter a valid email.");
+      return;
+    }
+    setStatus("loading");
+    setErrorMsg("");
+    try {
+      await writeGofferSignup({
+        email: trimmed,
+        referrer_source: referrerSource,
+        feature_view_sequence: featureViewSequence,
+        ...utmParams,
+      });
+      ga4Event("goffer_signup", {
+        referrer_source: referrerSource,
+        utm_source: utmParams.utm_source,
+        utm_medium: utmParams.utm_medium,
+        utm_campaign: utmParams.utm_campaign,
+      });
+      setStatus("done");
+    } catch (err) {
+      console.error("[goffer] signup write failed:", err);
+      setStatus("error");
+      setErrorMsg("Something went wrong. Try again?");
+    }
+  };
+
+  if (status === "done") {
+    return (
+      <div className="border-t border-gray-100 px-4 py-3 text-center">
+        <p className="text-sm font-medium text-gray-700">You're on the list.</p>
+        <p className="mt-0.5 text-xs text-gray-400">We'll reach out with early access.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-t border-gray-100 px-4 py-3">
+      <p className="mb-2 text-center text-xs text-gray-500">
+        Free runs used · Get unlimited access
+      </p>
+      <div className="flex gap-2">
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+          placeholder="your@email.com"
+          className="flex-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs text-gray-800 placeholder:text-gray-400 focus:border-gray-400 focus:outline-none"
+        />
+        <button
+          onClick={handleSubmit}
+          disabled={status === "loading"}
+          className="rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-80 disabled:opacity-50"
+        >
+          {status === "loading" ? "…" : "Get access"}
+        </button>
+      </div>
+      {errorMsg && <p className="mt-1 text-center text-[11px] text-red-500">{errorMsg}</p>}
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────
 
 export function ChatInterface() {
@@ -257,6 +427,15 @@ export function ChatInterface() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // ── GA4 init (once on mount) ─────────────────────────────────────────────
+  useEffect(() => { initGa4(); }, []);
+
+  // ── Attribution state (captured once on mount) ──────────────────────────
+  const referrerSourceRef = useRef<ReferrerSource>(detectReferrerSource());
+  const utmParamsRef = useRef(captureUtmParams());
+  // Ordered sequence of agent IDs the user viewed/selected (deduped consecutively)
+  const [featureViewSequence, setFeatureViewSequence] = useState<string[]>([AGENTS[0].id]);
+
   const selectedAgent = AGENTS.find((a) => a.id === selectedAgentId) ?? AGENTS[0];
 
   const refreshRunsLeft = useCallback(() => {
@@ -266,6 +445,14 @@ export function ChatInterface() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  const handleAgentSelect = (agentId: string) => {
+    setSelectedAgentId(agentId);
+    // Track feature view — append only if different from last entry
+    setFeatureViewSequence((prev) =>
+      prev[prev.length - 1] === agentId ? prev : [...prev, agentId],
+    );
+  };
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text).catch(() => {});
@@ -299,6 +486,7 @@ export function ChatInterface() {
 
     consumeRun(agent.id);
     refreshRunsLeft();
+    ga4Event("goffer_run", { agent_id: agent.id });
 
     const responseText = pickResponse(agent);
 
@@ -336,6 +524,16 @@ export function ChatInterface() {
 
   const hasMessages = messages.length > 0;
   const canSend = input.trim().length > 0 && !streaming && runsLeft[selectedAgentId] > 0;
+  const selectedAgentRunsLeft = runsLeft[selectedAgentId];
+
+  // Track once per session when the signup gate first appears
+  const gateTrackedRef = useRef(false);
+  useEffect(() => {
+    if (selectedAgentRunsLeft <= 0 && !gateTrackedRef.current) {
+      gateTrackedRef.current = true;
+      ga4Event("goffer_signup_gate_shown", { agent_id: selectedAgentId });
+    }
+  }, [selectedAgentRunsLeft, selectedAgentId]);
 
   return (
     <main className="flex min-h-screen flex-col bg-[#FAFAF9]">
@@ -377,7 +575,7 @@ export function ChatInterface() {
               {AGENTS.map((agent) => (
                 <button
                   key={agent.id}
-                  onClick={() => setSelectedAgentId(agent.id)}
+                  onClick={() => handleAgentSelect(agent.id)}
                   disabled={runsLeft[agent.id] <= 0}
                   className={cn(
                     "rounded-2xl border p-4 text-left transition-all",
@@ -418,7 +616,7 @@ export function ChatInterface() {
       {/* ── Input area ── */}
       <div className="sticky bottom-0 bg-gradient-to-t from-[#FAFAF9] via-[#FAFAF9] to-transparent pb-8 pt-4">
         <div className="mx-auto max-w-[600px] px-4">
-          <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-[0_4px_24px_rgba(0,0,0,0.08)]">
+          <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-[0_4px_24px_rgba(0,0,0,0.08)] input-warm-focus">
             <textarea
               ref={textareaRef}
               value={input}
@@ -426,7 +624,7 @@ export function ChatInterface() {
               onKeyDown={handleKeyDown}
               placeholder={`Ask ${selectedAgent.name}...`}
               rows={1}
-              disabled={streaming || runsLeft[selectedAgentId] <= 0}
+              disabled={streaming || selectedAgentRunsLeft <= 0}
               className={cn(
                 "w-full resize-none bg-transparent px-4 pt-3.5 pb-2 text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none",
                 "min-h-[52px] max-h-40",
@@ -449,7 +647,7 @@ export function ChatInterface() {
                     selected={selectedAgentId === agent.id}
                     disabled={streaming}
                     runsLeft={runsLeft[agent.id]}
-                    onClick={() => setSelectedAgentId(agent.id)}
+                    onClick={() => handleAgentSelect(agent.id)}
                   />
                 ))}
               </div>
@@ -469,11 +667,13 @@ export function ChatInterface() {
               </button>
             </div>
 
-            {/* Out of runs notice */}
-            {runsLeft[selectedAgentId] <= 0 && (
-              <div className="border-t border-gray-100 px-4 py-2 text-center text-xs text-gray-400">
-                Free runs used up for today · Resets at midnight
-              </div>
+            {/* Out of runs: email capture gate */}
+            {selectedAgentRunsLeft <= 0 && (
+              <SignupGate
+                referrerSource={referrerSourceRef.current}
+                featureViewSequence={featureViewSequence}
+                utmParams={utmParamsRef.current}
+              />
             )}
           </div>
         </div>
