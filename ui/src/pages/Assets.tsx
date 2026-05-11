@@ -63,7 +63,7 @@ function FileCard({
         </p>
       </div>
       <a
-        href={`/api${file.contentPath}`}
+        href={file.contentPath}
         target="_blank"
         rel="noreferrer"
         className="text-xs text-muted-foreground hover:text-foreground shrink-0 hidden group-hover:inline"
