@@ -37,6 +37,10 @@ tmp/
 feedback-export-*
 diagnostics/
 
+# Vercel build output (never commit)
+.vercel/output/
+.vercel/.env*
+
 # Editor / tool temp files
 *.tmp
 .vscode/
