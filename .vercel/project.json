@@ -1,0 +1,16 @@
+{
+  "projectId": "prj_tZwdtO4lGBOgHQS5iJRQFKMFl0dj",
+  "orgId": "team_YvDRfc9aC1jFNH1fBMzihciW",
+  "projectName": "landscape-poc",
+  "settings": {
+    "createdAt": 1777253332013,
+    "framework": "vite",
+    "devCommand": null,
+    "installCommand": null,
+    "buildCommand": null,
+    "outputDirectory": null,
+    "rootDirectory": null,
+    "directoryListing": false,
+    "nodeVersion": "24.x"
+  }
+}
