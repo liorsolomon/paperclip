@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUp, Check, Copy, Download } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { cn } from "../lib/utils";
 
 // ── Agent definitions ─────────────────────────────────────────────────────
@@ -304,12 +306,23 @@ function MessageBubble({
           !isUser && message.isStreaming && "breathing-glow",
         )}
       >
-        <div className="whitespace-pre-wrap text-sm leading-relaxed">
-          {message.content}
-          {message.isStreaming && (
-            <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-current opacity-60" />
-          )}
-        </div>
+        {isUser ? (
+          <div className="whitespace-pre-wrap text-sm leading-relaxed">
+            {message.content}
+          </div>
+        ) : (
+          <div className="text-sm leading-relaxed prose prose-sm prose-gray max-w-none
+            prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1
+            prose-li:my-0 prose-code:bg-gray-100 prose-code:px-1 prose-code:rounded
+            prose-pre:bg-gray-100 prose-pre:rounded-lg">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {message.content}
+            </ReactMarkdown>
+            {message.isStreaming && (
+              <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-current opacity-60" />
+            )}
+          </div>
+        )}
 
         {!isUser && !message.isStreaming && (
           <div className="mt-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
